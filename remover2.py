@@ -35,28 +35,29 @@ def enhance_image_quality(image: Image.Image, enhance_factor: float = 1.2) -> Im
         image = enhancer.enhance(enhance_factor)
     return image
 
-def smooth_edges(image: Image.Image, blur_radius: int = 1) -> Image.Image:
-    """Smooth edges of the alpha channel for better quality"""
+def sharpen_edges(image: Image.Image, threshold: int = 128) -> Image.Image:
+    """Create sharp, exact edges without feathering"""
     if image.mode != 'RGBA':
         return image
     
     # Extract alpha channel
     alpha = image.split()[-1]
     
-    # Apply slight blur to alpha channel for smoother edges
-    if blur_radius > 0:
-        alpha = alpha.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    # Convert alpha to pure binary (0 or 255) for exact cuts
+    alpha_array = np.array(alpha)
+    binary_alpha = np.where(alpha_array >= threshold, 255, 0).astype(np.uint8)
+    sharp_alpha = Image.fromarray(binary_alpha)
     
-    # Reconstruct image with smoothed alpha
+    # Reconstruct image with sharp alpha
     rgb = image.convert('RGB')
     result = Image.new('RGBA', image.size)
     result.paste(rgb)
-    result.putalpha(alpha)
+    result.putalpha(sharp_alpha)
     
     return result
 
-def remove_background_advanced(image: Image.Image, model_session, post_process: bool = True) -> Image.Image:
-    """Remove background using rembg with advanced post-processing"""
+def remove_background_advanced(image: Image.Image, model_session, sharp_edges: bool = True, threshold: int = 128) -> Image.Image:
+    """Remove background using rembg with exact sharp cuts"""
     
     # Convert image to bytes for rembg
     img_byte_arr = BytesIO()
@@ -67,9 +68,9 @@ def remove_background_advanced(image: Image.Image, model_session, post_process: 
     result_bytes = remove(img_byte_arr, session=model_session)
     result_image = Image.open(BytesIO(result_bytes))
     
-    # Post-processing for better quality
-    if post_process:
-        result_image = smooth_edges(result_image, blur_radius=0)
+    # Create sharp, exact edges
+    if sharp_edges:
+        result_image = sharpen_edges(result_image, threshold=threshold)
     
     return result_image
 
@@ -116,8 +117,10 @@ selected_model = st.sidebar.selectbox(
 
 # Quality settings
 enhance_quality = st.sidebar.checkbox("Enhance input quality", value=True)
-post_process = st.sidebar.checkbox("Advanced post-processing", value=True)
-edge_smoothing = st.sidebar.slider("Edge smoothing", 0, 3, 1, help="Higher values = smoother edges")
+sharp_edges = st.sidebar.checkbox("Sharp exact edges", value=True, help="Remove feathering for exact cuts")
+edge_threshold = st.sidebar.slider("Edge threshold", 50, 200, 128, 
+                                 help="Higher values = less transparent pixels kept", 
+                                 disabled=not sharp_edges)
 
 # Load model session
 with st.spinner(f"Loading {MODELS[selected_model]}..."):
@@ -166,18 +169,14 @@ if uploaded_file is not None:
             result_image = remove_background_advanced(
                 processed_image, 
                 session, 
-                post_process=post_process
+                sharp_edges=sharp_edges,
+                threshold=edge_threshold
             )
             
-            # Step 3: Apply edge smoothing
-            status_text.text("Step 3/4: Smoothing edges...")
-            progress_bar.progress(75)
-            
-            if edge_smoothing > 0:
-                result_image = smooth_edges(result_image, blur_radius=edge_smoothing)
-            
-            # Step 4: Generate variants
+            # Step 3: Final processing
+            status_text.text("Step 3/4: Finalizing...")
             status_text.text("Step 4/4: Generating download options...")
+            progress_bar.progress(100)
             progress_bar.progress(100)
             
             # Display result
@@ -347,11 +346,11 @@ else:
     
     with feature_cols[1]:
         st.markdown("""
-        **🎯 Perfect Quality**
-        - Maintains original resolution
-        - Advanced edge smoothing
-        - Quality enhancement options
-        - Professional results
+        **🎯 Perfect Sharp Cuts**
+        - No feathering or soft edges
+        - Exact binary alpha masks
+        - Adjustable edge threshold
+        - Professional clean cuts
         """)
     
     with feature_cols[2]:
